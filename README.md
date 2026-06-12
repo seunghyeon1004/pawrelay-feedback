@@ -30,6 +30,10 @@ Supabase anon key는 클라이언트 공개 키입니다. 보안은 `supabase-fe
 4. Supabase Auth redirect allow list에
    `https://seunghyeon1004.github.io/pawrelay-feedback/`를 추가합니다.
 
+현재 운영 상태: GitHub OAuth App `PawRelay Feedback Board Admin`이 생성되어 있고,
+Supabase GitHub provider가 활성화되어 있습니다. 2026-06-12 KST에 공개 URL에서
+GitHub 승인 -> Supabase callback -> 관리자 콘솔 진입까지 확인했습니다.
+
 ## 제출 자료 운영 흐름
 
 1. 테스터가 사이트에 피드백을 제출합니다.
