@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="PawRelay closed test feedback board for tester comments, internal QA notes, and Play test report exports."
+    />
+    <title>PawRelay Feedback Board</title>
+    <link rel="icon" href="./assets/pawrelay-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script>
+      window.PAWRELAY_FEEDBACK_CONFIG = {
+        supabaseUrl: "",
+        supabaseAnonKey: "",
+        adminEmails: ["hyunever100@gmail.com"],
+        boardTitle: "PawRelay Feedback Board"
+      };
+    </script>
+    <script src="./config.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="touch-dots" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="PawRelay feedback board home">
+        <img src="./assets/pawrelay-icon.png" alt="" />
+        <span>PawRelay</span>
+      </a>
+      <nav class="header-actions" aria-label="Feedback board navigation">
+        <a href="#board">피드백</a>
+        <a href="#internal-qa">내부 QA</a>
+        <a href="#report">리포트</a>
+        <button class="ghost-button" type="button" data-admin-toggle>관리자</button>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero-shell" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="soft-label">Closed test feedback log</p>
+          <h1 id="page-title">PawRelay 의견함</h1>
+          <p>
+            테스터가 남긴 불편함, 우리가 확인한 내부 QA, 반영된 수정사항을 한곳에 남깁니다.
+            Google Play 제출용 테스트 근거도 여기서 정리합니다.
+          </p>
+          <div class="hero-pills" aria-label="Board qualities">
+            <span>실제 테스트 기록</span>
+            <span>처리 상태 공개</span>
+            <span>제출 리포트 내보내기</span>
+          </div>
+        </div>
+        <div class="mascot-stage" aria-hidden="true">
+          <img class="dog" src="./assets/default-dog.png" alt="" />
+          <img class="cat" src="./assets/default-cat.png" alt="" />
+          <span class="spark spark-a"></span>
+          <span class="spark spark-b"></span>
+          <span class="spark spark-c"></span>
+        </div>
+      </section>
+
+      <section class="submission-band" aria-labelledby="submit-title">
+        <div class="section-heading">
+          <div>
+            <p class="soft-label">Leave feedback</p>
+            <h2 id="submit-title">테스터 의견 남기기</h2>
+          </div>
+          <p>
+            공개 게시판에는 제목, 닉네임, 처리 상태만 표시됩니다. 본문과 Google ID는 리포트용
+            비공개 기록으로 보관합니다.
+          </p>
+        </div>
+
+        <form class="feedback-form" data-feedback-form>
+          <label>
+            구분
+            <select name="sourceType" required>
+              <option value="tester">테스터 피드백</option>
+              <option value="founder_qa">Founder QA</option>
+              <option value="internal_qa">내부 QA</option>
+            </select>
+          </label>
+          <label>
+            닉네임
+            <input name="displayName" maxlength="40" placeholder="예: 초코보호자" required />
+          </label>
+          <label>
+            테스트 Google ID
+            <input
+              name="testerGoogleId"
+              type="email"
+              maxlength="120"
+              placeholder="공개되지 않음"
+              autocomplete="email"
+            />
+          </label>
+          <label>
+            앱 버전
+            <input name="appVersion" maxlength="24" placeholder="예: v10" />
+          </label>
+          <label>
+            카테고리
+            <select name="category" required>
+              <option value="UX">UX / 사용성</option>
+              <option value="Bug">버그</option>
+              <option value="Billing">결제 / 복원</option>
+              <option value="Family Sync">가족공유</option>
+              <option value="Google Drive">Google Drive</option>
+              <option value="Ads">광고 / 동의</option>
+              <option value="Cute Polish">귀여움 / 디자인</option>
+              <option value="Other">기타</option>
+            </select>
+          </label>
+          <label>
+            기기 / 환경
+            <input name="device" maxlength="80" placeholder="예: Pixel 7 emulator, Android 15" />
+          </label>
+          <label class="wide">
+            한 줄 요약
+            <input
+              name="title"
+              maxlength="90"
+              placeholder="예: 코드로 참가 실패 시 알림이 필요해요"
+              required
+            />
+          </label>
+          <label class="wide">
+            자세한 내용
+            <textarea
+              name="body"
+              maxlength="1200"
+              placeholder="무엇을 눌렀고, 어떤 결과를 기대했고, 실제로 무엇이 보였는지 적어주세요. 공개 목록에는 보이지 않습니다."
+              required
+            ></textarea>
+          </label>
+          <label>
+            만족도
+            <select name="rating">
+              <option value="">선택 안 함</option>
+              <option value="5">5 - 매우 좋음</option>
+              <option value="4">4 - 좋음</option>
+              <option value="3">3 - 보통</option>
+              <option value="2">2 - 불편함</option>
+              <option value="1">1 - 막힘</option>
+            </select>
+          </label>
+          <label>
+            스크린샷 링크
+            <input name="screenshotUrl" type="url" maxlength="300" placeholder="선택사항" />
+          </label>
+          <div class="form-actions wide">
+            <p data-submit-note>현재는 로컬 미리보기 모드입니다. Supabase 연결 후 공개 저장됩니다.</p>
+            <button class="primary-button" type="submit">피드백 제출</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="board-band" id="board" aria-labelledby="board-title">
+        <div class="section-heading">
+          <div>
+            <p class="soft-label">Public board</p>
+            <h2 id="board-title">공개 피드백 보드</h2>
+          </div>
+          <div class="board-tools">
+            <input data-search placeholder="검색" aria-label="피드백 검색" />
+            <select data-status-filter aria-label="상태 필터">
+              <option value="all">모든 상태</option>
+              <option value="received">접수</option>
+              <option value="reviewing">확인중</option>
+              <option value="planned">반영 예정</option>
+              <option value="fixed">수정 완료</option>
+              <option value="deferred">보류</option>
+            </select>
+          </div>
+        </div>
+        <div class="feedback-list" data-feedback-list></div>
+      </section>
+
+      <section class="qa-band" id="internal-qa" aria-labelledby="qa-title">
+        <div class="section-heading">
+          <div>
+            <p class="soft-label">Founder QA timeline</p>
+            <h2 id="qa-title">v2 이후 내부 테스트 기록</h2>
+          </div>
+          <p>
+            개발 중 발견한 문제와 수정 내역입니다. 실제 테스터 의견과 구분해서 제출 근거로 남깁니다.
+          </p>
+        </div>
+        <div class="timeline" data-qa-timeline></div>
+      </section>
+
+      <section class="report-band" id="report" aria-labelledby="report-title">
+        <div class="report-card">
+          <div>
+            <p class="soft-label">Google Play evidence</p>
+            <h2 id="report-title">테스트 제출용 리포트</h2>
+          <p>
+            비공개 본문, 관리자 답변, 내부 QA 타임라인을 Markdown 또는 Excel용 CSV로 저장합니다.
+            Play Console 생산 액세스 신청 시 테스트 과정 설명 자료로 쓰기 좋게 구성했습니다.
+          </p>
+          </div>
+          <div class="report-actions">
+            <button class="secondary-button" type="button" data-export-markdown>Markdown 저장</button>
+            <button class="secondary-button" type="button" data-export-csv>Excel CSV 저장</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="admin-panel" data-admin-panel hidden aria-labelledby="admin-title">
+        <div class="section-heading">
+          <div>
+            <p class="soft-label">Admin reply mode</p>
+            <h2 id="admin-title">관리자 답변 / 상태 변경</h2>
+          </div>
+          <p>
+            운영 배포에서는 Supabase Auth와 RLS로 관리자 이메일만 본문과 Google ID를 볼 수
+            있습니다. 로컬 미리보기에서는 브라우저 저장소에만 반영됩니다.
+          </p>
+        </div>
+        <div class="admin-login">
+          <button class="primary-button" type="button" data-admin-login>Google로 관리자 로그인</button>
+          <button class="ghost-button" type="button" data-admin-logout>로그아웃</button>
+          <span data-admin-state>로컬 미리보기 관리자 모드</span>
+        </div>
+        <div class="admin-editor" data-admin-editor></div>
+      </section>
+    </main>
+
+    <template id="feedback-card-template">
+      <article class="feedback-card">
+        <div class="feedback-icon" data-icon></div>
+        <div class="feedback-main">
+          <div class="feedback-topline">
+            <strong data-title></strong>
+            <span data-status></span>
+          </div>
+          <p data-body></p>
+          <div class="feedback-meta" data-meta></div>
+          <div class="reply-box" data-reply></div>
+        </div>
+      </article>
+    </template>
+  </body>
+</html>
