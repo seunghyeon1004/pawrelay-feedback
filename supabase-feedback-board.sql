@@ -30,6 +30,31 @@ create table if not exists public.feedback_replies (
   body text not null check (char_length(body) between 1 and 800)
 );
 
+create or replace function public.feedback_is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, auth
+as $$
+  select exists (
+    select 1
+    from auth.identities identity
+    where identity.user_id = (select auth.uid())
+      and identity.provider = 'github'
+      and lower(
+        coalesce(
+          nullif(identity.identity_data ->> 'user_name', ''),
+          nullif(identity.identity_data ->> 'preferred_username', ''),
+          nullif(identity.identity_data ->> 'nickname', ''),
+          nullif(identity.identity_data ->> 'login', ''),
+          nullif(identity.identity_data ->> 'name', ''),
+          ''
+        )
+      ) = any (array['seunghyeon1004'])
+  );
+$$;
+
 alter table public.feedback_posts enable row level security;
 alter table public.feedback_replies enable row level security;
 
@@ -39,12 +64,48 @@ on public.feedback_posts
 for insert
 to anon, authenticated
 with check (
-  source_type in ('tester', 'founder_qa', 'internal_qa')
+  source_type = 'tester'
   and status = 'received'
   and char_length(display_name) between 1 and 40
   and char_length(title) between 1 and 90
   and char_length(body) between 1 and 1200
 );
+
+drop policy if exists "Admins can read full feedback" on public.feedback_posts;
+create policy "Admins can read full feedback"
+on public.feedback_posts
+for select
+to authenticated
+using ((select public.feedback_is_admin()));
+
+drop policy if exists "Admins can update feedback state" on public.feedback_posts;
+create policy "Admins can update feedback state"
+on public.feedback_posts
+for update
+to authenticated
+using ((select public.feedback_is_admin()))
+with check ((select public.feedback_is_admin()));
+
+drop policy if exists "Admins can delete feedback" on public.feedback_posts;
+create policy "Admins can delete feedback"
+on public.feedback_posts
+for delete
+to authenticated
+using ((select public.feedback_is_admin()));
+
+drop policy if exists "Admins can read replies" on public.feedback_replies;
+create policy "Admins can read replies"
+on public.feedback_replies
+for select
+to authenticated
+using ((select public.feedback_is_admin()));
+
+drop policy if exists "Admins can add replies" on public.feedback_replies;
+create policy "Admins can add replies"
+on public.feedback_replies
+for insert
+to authenticated
+with check ((select public.feedback_is_admin()));
 
 drop view if exists public.feedback_admin;
 drop view if exists public.feedback_export;
@@ -71,7 +132,37 @@ select
 from public.feedback_posts p
 order by p.created_at desc;
 
+create view public.feedback_admin
+with (security_invoker = true, security_barrier = true)
+as
+select
+  p.*,
+  exists (
+    select 1
+    from public.feedback_replies r
+    where r.post_id = p.id
+  ) as has_reply,
+  coalesce(
+    (
+      select json_agg(
+        json_build_object(
+          'id', r.id,
+          'created_at', r.created_at,
+          'reply_name', r.reply_name,
+          'body', r.body
+        )
+        order by r.created_at desc
+      )
+      from public.feedback_replies r
+      where r.post_id = p.id
+    ),
+    '[]'::json
+  ) as replies
+from public.feedback_posts p
+order by p.created_at desc;
+
 create view public.feedback_export
+with (security_invoker = true, security_barrier = true)
 as
 select
   p.*,
@@ -101,7 +192,11 @@ order by p.created_at desc;
 
 grant usage on schema public to anon, authenticated;
 grant insert on public.feedback_posts to anon, authenticated;
+grant select, update, delete on public.feedback_posts to authenticated;
+grant select, insert on public.feedback_replies to authenticated;
 grant select on public.feedback_public to anon, authenticated;
--- Full feedback export is intentionally not granted to anon/authenticated web users.
--- Use the Supabase dashboard or SQL Editor as the project owner to export
--- public.feedback_posts, public.feedback_replies, or public.feedback_export.
+grant select on public.feedback_admin to authenticated;
+grant select on public.feedback_export to authenticated;
+
+revoke all on public.feedback_admin from anon;
+revoke all on public.feedback_export from anon;

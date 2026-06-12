@@ -156,7 +156,11 @@ const qaTimeline = [
 
 const localStorageKey = "pawrelay-feedback-board-v1";
 let feedbackItems = [];
+let adminItems = [];
+let adminSession = null;
+let adminReady = false;
 let supabaseClient = null;
+let feedbackLoadError = "";
 
 const els = {
   form: document.querySelector("[data-feedback-form]"),
@@ -166,14 +170,26 @@ const els = {
   statusFilter: document.querySelector("[data-status-filter]"),
   submitNote: document.querySelector("[data-submit-note]"),
   exportMarkdown: document.querySelector("[data-export-markdown]"),
-  exportCsv: document.querySelector("[data-export-csv]")
+  exportCsv: document.querySelector("[data-export-csv]"),
+  adminStatus: document.querySelector("[data-admin-status]"),
+  adminNote: document.querySelector("[data-admin-note]"),
+  adminLogin: document.querySelector("[data-admin-login]"),
+  adminLogout: document.querySelector("[data-admin-logout]"),
+  adminRefresh: document.querySelector("[data-admin-refresh]"),
+  adminToolbar: document.querySelector("[data-admin-toolbar]"),
+  adminList: document.querySelector("[data-admin-list]"),
+  exportPrivateCsv: document.querySelector("[data-export-private-csv]")
 };
 
 function initSupabase() {
-  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey || !window.supabase) {
+  if (!hasSupabaseConfig() || !window.supabase) {
     return null;
   }
   return window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+}
+
+function hasSupabaseConfig() {
+  return Boolean(cfg.supabaseUrl && cfg.supabaseAnonKey);
 }
 
 function normalizeItem(item) {
@@ -184,8 +200,22 @@ function normalizeItem(item) {
     created_at: item.created_at || new Date().toISOString(),
     status: item.status || "received",
     has_reply: Boolean(item.has_reply || item.admin_summary || item.replies?.length),
-    replies: item.replies || []
+    replies: normalizeReplies(item.replies)
   };
+}
+
+function normalizeReplies(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
 }
 
 function loadLocalItems() {
@@ -203,7 +233,15 @@ function saveLocalUserItems() {
 }
 
 async function loadFeedback() {
-  if (supabaseClient) {
+  feedbackLoadError = "";
+
+  if (hasSupabaseConfig()) {
+    if (!supabaseClient) {
+      feedbackItems = [];
+      feedbackLoadError = "피드백 보드를 불러오지 못했습니다. 잠시 후 새로고침해주세요.";
+      return;
+    }
+
     const { data, error } = await supabaseClient
       .from("feedback_public")
       .select("*")
@@ -217,8 +255,12 @@ async function loadFeedback() {
       );
       return;
     }
-    console.warn("Falling back to local feedback data:", error?.message);
+    feedbackItems = [];
+    feedbackLoadError = "피드백 보드를 불러오지 못했습니다. 잠시 후 새로고침해주세요.";
+    console.warn("Feedback board load failed:", error?.message);
+    return;
   }
+
   feedbackItems = loadLocalItems();
 }
 
@@ -236,6 +278,18 @@ function renderFeedback() {
         .includes(query);
     })
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  if (!filtered.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-board";
+    empty.textContent =
+      feedbackLoadError ||
+      (feedbackItems.length
+        ? "조건에 맞는 피드백이 없습니다."
+        : "아직 등록된 피드백이 없습니다. 첫 의견을 남겨주세요.");
+    els.list.replaceChildren(empty);
+    return;
+  }
 
   els.list.replaceChildren(...filtered.map(renderFeedbackCard));
 }
@@ -266,6 +320,164 @@ function renderFeedbackCard(item) {
   return card;
 }
 
+async function refreshAdminSession() {
+  if (!supabaseClient) {
+    adminSession = null;
+    adminReady = false;
+    renderAdminPanel("Supabase 연결 후 관리자 기능을 사용할 수 있습니다.");
+    return;
+  }
+
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error) {
+    adminSession = null;
+    adminReady = false;
+    renderAdminPanel(`관리자 세션 확인 실패: ${error.message}`);
+    return;
+  }
+
+  adminSession = data.session;
+  if (!adminSession) {
+    adminReady = false;
+    adminItems = [];
+    renderAdminPanel("GitHub 관리자 계정으로 로그인하면 원문과 답글 관리가 열립니다.");
+    return;
+  }
+
+  await loadAdminFeedback();
+}
+
+async function loadAdminFeedback() {
+  if (!supabaseClient || !adminSession) return;
+
+  const { data, error } = await supabaseClient
+    .from("feedback_admin")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    adminReady = false;
+    adminItems = [];
+    renderAdminPanel(`관리자 권한 확인 실패: ${error.message}`);
+    return;
+  }
+
+  adminReady = true;
+  adminItems = (data || []).map(normalizeItem);
+  renderAdminPanel();
+}
+
+function renderAdminPanel(message = "") {
+  const signedIn = Boolean(adminSession);
+  const userLabel = signedIn ? adminSession.user?.email || "GitHub 관리자" : "";
+
+  els.adminLogin.hidden = signedIn;
+  els.adminLogout.hidden = !signedIn;
+  els.adminToolbar.hidden = !adminReady;
+
+  if (!signedIn) {
+    els.adminStatus.textContent = "관리자 로그인이 필요합니다.";
+  } else if (adminReady) {
+    els.adminStatus.textContent = `${userLabel} 로그인됨`;
+  } else {
+    els.adminStatus.textContent = "관리자 권한을 확인할 수 없습니다.";
+  }
+
+  els.adminNote.textContent =
+    message ||
+    (adminReady
+      ? "비공개 본문, Google ID, 기기 정보, 답글을 확인하고 처리 상태를 바꿀 수 있습니다."
+      : "GitHub 관리자 계정만 원문을 볼 수 있습니다.");
+
+  if (!adminReady) {
+    els.adminList.replaceChildren();
+    return;
+  }
+
+  if (!adminItems.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-admin";
+    empty.textContent = "아직 등록된 피드백이 없습니다.";
+    els.adminList.replaceChildren(empty);
+    return;
+  }
+
+  els.adminList.replaceChildren(...adminItems.map(renderAdminCard));
+}
+
+function renderAdminCard(item) {
+  const card = document.createElement("article");
+  card.className = "admin-card";
+  card.dataset.id = item.id;
+  card.innerHTML = `
+    <div class="admin-card-header">
+      <div>
+        <h3>${escapeHtml(item.title)}</h3>
+        <div class="feedback-meta">
+          <span>${escapeHtml(sourceLabels[item.source_type] || item.source_type)}</span>
+          <span>${escapeHtml(formatDate(item.created_at))}</span>
+          <span>${escapeHtml(item.category || "Other")}</span>
+        </div>
+      </div>
+      <span class="status-chip ${statusClass[item.status] || statusClass.received}">
+        ${escapeHtml(statusLabels[item.status] || item.status)}
+      </span>
+    </div>
+    <p class="admin-card-body">${escapeHtml(item.body)}</p>
+    <div class="admin-meta-grid">
+      <span><b>닉네임</b>${escapeHtml(item.display_name || "-")}</span>
+      <span><b>Google ID</b>${escapeHtml(item.tester_google_id || "-")}</span>
+      <span><b>앱 버전</b>${escapeHtml(item.app_version || "-")}</span>
+      <span><b>기기</b>${escapeHtml(item.device || "-")}</span>
+      <span><b>만족도</b>${item.rating ? `${escapeHtml(item.rating)} / 5` : "-"}</span>
+      <span><b>스크린샷</b>${item.screenshot_url ? `<a href="${escapeAttribute(item.screenshot_url)}" target="_blank" rel="noreferrer">열기</a>` : "-"}</span>
+      <span><b>반영 버전</b>${escapeHtml(item.fixed_version || "-")}</span>
+      <span><b>답글</b>${item.replies.length ? `${item.replies.length}개` : "없음"}</span>
+    </div>
+    <div class="admin-edit-grid">
+      <label>
+        상태
+        <select data-admin-field="status">
+          ${Object.entries(statusLabels)
+            .map(
+              ([value, label]) =>
+                `<option value="${escapeAttribute(value)}" ${value === item.status ? "selected" : ""}>${escapeHtml(label)}</option>`
+            )
+            .join("")}
+        </select>
+      </label>
+      <label>
+        반영 버전
+        <input data-admin-field="fixed_version" maxlength="24" value="${escapeAttribute(item.fixed_version || "")}" placeholder="예: v11" />
+      </label>
+    </div>
+    <div class="admin-replies">
+      ${item.replies.map(renderAdminReply).join("")}
+    </div>
+    <div class="admin-reply-form">
+      <label>
+        답글 / 처리 메모
+        <textarea data-admin-field="reply" maxlength="800" placeholder="예: 확인했습니다. 다음 빌드에서 수정하겠습니다."></textarea>
+      </label>
+      <div class="admin-card-actions">
+        <button class="secondary-button" type="button" data-admin-action="save">상태 저장</button>
+        <button class="primary-button" type="button" data-admin-action="reply">답글 등록</button>
+        <button class="danger-button" type="button" data-admin-action="delete">삭제</button>
+      </div>
+    </div>
+  `;
+  return card;
+}
+
+function renderAdminReply(reply) {
+  return `
+    <div class="admin-reply">
+      <small>${escapeHtml(reply.reply_name || "PawRelay Studio")} · ${escapeHtml(formatDate(reply.created_at))}</small>
+      ${escapeHtml(reply.body || "")}
+    </div>
+  `;
+}
+
 function renderTimeline() {
   els.timeline.replaceChildren(
     ...qaTimeline.map((item) => {
@@ -289,7 +501,7 @@ async function submitFeedback(event) {
   event.preventDefault();
   const formData = new FormData(els.form);
   const item = normalizeItem({
-    source_type: formData.get("sourceType"),
+    source_type: "tester",
     display_name: cleanText(formData.get("displayName"), 40),
     tester_google_id: cleanText(formData.get("testerGoogleId"), 120),
     app_version: cleanText(formData.get("appVersion"), 24),
@@ -321,12 +533,119 @@ async function submitFeedback(event) {
       return;
     }
     await loadFeedback();
+    if (adminReady) await loadAdminFeedback();
   } else {
     feedbackItems.unshift(item);
     saveLocalUserItems();
   }
   els.form.reset();
   renderFeedback();
+}
+
+async function loginAdmin() {
+  if (!supabaseClient) {
+    alert("Supabase 설정이 없어 관리자 로그인을 사용할 수 없습니다.");
+    return;
+  }
+
+  const redirectTo = `${window.location.origin}${window.location.pathname}`;
+  const { error } = await supabaseClient.auth.signInWithOAuth({
+    provider: "github",
+    options: {
+      redirectTo
+    }
+  });
+  if (error) {
+    alert(`GitHub 로그인 시작 실패: ${error.message}`);
+  }
+}
+
+async function logoutAdmin() {
+  if (!supabaseClient) return;
+  await supabaseClient.auth.signOut();
+  adminSession = null;
+  adminReady = false;
+  adminItems = [];
+  renderAdminPanel("로그아웃했습니다.");
+}
+
+async function handleAdminClick(event) {
+  const button = event.target.closest("[data-admin-action]");
+  if (!button) return;
+
+  const card = button.closest(".admin-card");
+  const id = card?.dataset.id;
+  if (!id) return;
+
+  const action = button.dataset.adminAction;
+  if (action === "save") {
+    await saveAdminPost(card, id);
+  } else if (action === "reply") {
+    await addAdminReply(card, id);
+  } else if (action === "delete") {
+    await deleteAdminPost(id);
+  }
+}
+
+async function saveAdminPost(card, id) {
+  const status = card.querySelector('[data-admin-field="status"]').value;
+  const fixedVersion = cleanText(card.querySelector('[data-admin-field="fixed_version"]').value, 24);
+  const { error } = await supabaseClient
+    .from("feedback_posts")
+    .update({
+      status,
+      fixed_version: fixedVersion || null
+    })
+    .eq("id", id);
+
+  if (error) {
+    alert(`상태 저장 실패: ${error.message}`);
+    return;
+  }
+
+  await refreshAfterAdminChange("상태를 저장했습니다.");
+}
+
+async function addAdminReply(card, id) {
+  const replyInput = card.querySelector('[data-admin-field="reply"]');
+  const body = cleanText(replyInput.value, 800);
+  if (!body) {
+    alert("답글 내용을 입력해주세요.");
+    return;
+  }
+
+  const { error } = await supabaseClient.from("feedback_replies").insert({
+    post_id: id,
+    reply_name: "PawRelay Studio",
+    body
+  });
+
+  if (error) {
+    alert(`답글 등록 실패: ${error.message}`);
+    return;
+  }
+
+  replyInput.value = "";
+  await refreshAfterAdminChange("답글을 등록했습니다.");
+}
+
+async function deleteAdminPost(id) {
+  if (!confirm("이 피드백을 삭제할까요? Play 제출 증빙에서도 사라집니다.")) return;
+
+  const { error } = await supabaseClient.from("feedback_posts").delete().eq("id", id);
+  if (error) {
+    alert(`삭제 실패: ${error.message}`);
+    return;
+  }
+
+  await refreshAfterAdminChange("피드백을 삭제했습니다.");
+}
+
+async function refreshAfterAdminChange(message) {
+  await loadFeedback();
+  renderFeedback();
+  await loadAdminFeedback();
+  els.adminNote.textContent = message;
 }
 
 function exportMarkdown() {
@@ -400,6 +719,50 @@ function exportCsv() {
   );
 }
 
+function exportPrivateCsv() {
+  const header = [
+    "created_at",
+    "source_type",
+    "display_name",
+    "tester_google_id",
+    "app_version",
+    "category",
+    "device",
+    "rating",
+    "status",
+    "fixed_version",
+    "title",
+    "body",
+    "screenshot_url",
+    "replies"
+  ];
+  const rows = adminItems.map((item) =>
+    [
+      item.created_at,
+      item.source_type,
+      item.display_name,
+      item.tester_google_id,
+      item.app_version,
+      item.category,
+      item.device,
+      item.rating,
+      item.status,
+      item.fixed_version,
+      item.title,
+      item.body,
+      item.screenshot_url,
+      item.replies
+        .map((reply) => `${reply.reply_name || "PawRelay Studio"}: ${reply.body || ""}`)
+        .join(" | ")
+    ].map(csvCell)
+  );
+  downloadFile(
+    "pawrelay-closed-test-private-feedback-export.csv",
+    [header.map(csvCell), ...rows].map((row) => row.join(",")).join("\n"),
+    "text/csv"
+  );
+}
+
 function iconForCategory(category = "") {
   if (category.includes("Billing")) return "₩";
   if (category.includes("Family")) return "↔";
@@ -425,10 +788,12 @@ function cleanText(value, maxLength) {
 }
 
 function formatDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
   return new Intl.DateTimeFormat("ko-KR", {
     dateStyle: "medium",
     timeStyle: "short"
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function escapeHtml(value) {
@@ -475,6 +840,11 @@ function bindEvents() {
   els.statusFilter.addEventListener("change", renderFeedback);
   els.exportMarkdown.addEventListener("click", exportMarkdown);
   els.exportCsv.addEventListener("click", exportCsv);
+  els.adminLogin.addEventListener("click", loginAdmin);
+  els.adminLogout.addEventListener("click", logoutAdmin);
+  els.adminRefresh.addEventListener("click", loadAdminFeedback);
+  els.exportPrivateCsv.addEventListener("click", exportPrivateCsv);
+  els.adminList.addEventListener("click", handleAdminClick);
   document.addEventListener("pointerdown", addTouchPaw, { passive: true });
 }
 
@@ -487,6 +857,12 @@ async function boot() {
   renderTimeline();
   await loadFeedback();
   renderFeedback();
+  await refreshAdminSession();
+  if (supabaseClient) {
+    supabaseClient.auth.onAuthStateChange(() => {
+      refreshAdminSession();
+    });
+  }
 }
 
 boot();

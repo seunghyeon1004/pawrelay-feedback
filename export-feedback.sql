@@ -1,4 +1,5 @@
--- Run in Supabase SQL Editor, then use "Download CSV".
+-- Fallback export for Supabase SQL Editor.
+-- Prefer the site's GitHub-admin console "전체 기록 CSV" button.
 -- This contains private feedback body and tester Google ID, so do not expose it publicly.
 
 select
@@ -18,4 +19,3 @@ select
   replies
 from public.feedback_export
 order by created_at desc;
-
