@@ -30,16 +30,6 @@ create table if not exists public.feedback_replies (
   body text not null check (char_length(body) between 1 and 800)
 );
 
-create or replace function public.feedback_is_admin()
-returns boolean
-language sql
-stable
-as $$
-  select coalesce(auth.jwt() ->> 'email', '') = any (array[
-    'hyunever100@gmail.com'
-  ]);
-$$;
-
 alter table public.feedback_posts enable row level security;
 alter table public.feedback_replies enable row level security;
 
@@ -56,36 +46,8 @@ with check (
   and char_length(body) between 1 and 1200
 );
 
-drop policy if exists "Admins can read full feedback" on public.feedback_posts;
-create policy "Admins can read full feedback"
-on public.feedback_posts
-for select
-to authenticated
-using (public.feedback_is_admin());
-
-drop policy if exists "Admins can update feedback state" on public.feedback_posts;
-create policy "Admins can update feedback state"
-on public.feedback_posts
-for update
-to authenticated
-using (public.feedback_is_admin())
-with check (public.feedback_is_admin());
-
-drop policy if exists "Admins can read replies" on public.feedback_replies;
-create policy "Admins can read replies"
-on public.feedback_replies
-for select
-to authenticated
-using (public.feedback_is_admin());
-
-drop policy if exists "Admins can add replies" on public.feedback_replies;
-create policy "Admins can add replies"
-on public.feedback_replies
-for insert
-to authenticated
-with check (public.feedback_is_admin());
-
 drop view if exists public.feedback_admin;
+drop view if exists public.feedback_export;
 drop view if exists public.feedback_public;
 
 create view public.feedback_public
@@ -109,8 +71,7 @@ select
 from public.feedback_posts p
 order by p.created_at desc;
 
-create view public.feedback_admin
-with (security_barrier = true)
+create view public.feedback_export
 as
 select
   p.*,
@@ -136,13 +97,11 @@ select
     '[]'::json
   ) as replies
 from public.feedback_posts p
-where public.feedback_is_admin()
 order by p.created_at desc;
 
 grant usage on schema public to anon, authenticated;
 grant insert on public.feedback_posts to anon, authenticated;
 grant select on public.feedback_public to anon, authenticated;
-grant select on public.feedback_admin to authenticated;
-grant select, update on public.feedback_posts to authenticated;
-grant select, insert on public.feedback_replies to authenticated;
-
+-- Full feedback export is intentionally not granted to anon/authenticated web users.
+-- Use the Supabase dashboard or SQL Editor as the project owner to export
+-- public.feedback_posts, public.feedback_replies, or public.feedback_export.

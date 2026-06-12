@@ -157,7 +157,6 @@ const qaTimeline = [
 const localStorageKey = "pawrelay-feedback-board-v1";
 let feedbackItems = [];
 let supabaseClient = null;
-let adminSession = null;
 
 const els = {
   form: document.querySelector("[data-feedback-form]"),
@@ -166,12 +165,6 @@ const els = {
   search: document.querySelector("[data-search]"),
   statusFilter: document.querySelector("[data-status-filter]"),
   submitNote: document.querySelector("[data-submit-note]"),
-  adminToggle: document.querySelector("[data-admin-toggle]"),
-  adminPanel: document.querySelector("[data-admin-panel]"),
-  adminLogin: document.querySelector("[data-admin-login]"),
-  adminLogout: document.querySelector("[data-admin-logout]"),
-  adminState: document.querySelector("[data-admin-state]"),
-  adminEditor: document.querySelector("[data-admin-editor]"),
   exportMarkdown: document.querySelector("[data-export-markdown]"),
   exportCsv: document.querySelector("[data-export-csv]")
 };
@@ -211,9 +204,8 @@ function saveLocalUserItems() {
 
 async function loadFeedback() {
   if (supabaseClient) {
-    const tableName = adminSession ? "feedback_admin" : "feedback_public";
     const { data, error } = await supabaseClient
-      .from(tableName)
+      .from("feedback_public")
       .select("*")
       .order("created_at", { ascending: false });
     if (!error && data) {
@@ -246,7 +238,6 @@ function renderFeedback() {
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   els.list.replaceChildren(...filtered.map(renderFeedbackCard));
-  renderAdminEditor();
 }
 
 function renderFeedbackCard(item) {
@@ -288,41 +279,6 @@ function renderTimeline() {
           <p><strong>조치:</strong> ${escapeHtml(item.fix)}</p>
         </div>
         <span class="status-chip ${timelineResultClass(item.result)} timeline-result">${escapeHtml(item.result)}</span>
-      `;
-      return row;
-    })
-  );
-}
-
-function renderAdminEditor() {
-  if (els.adminPanel.hidden) return;
-  els.adminEditor.replaceChildren(
-    ...feedbackItems.map((item) => {
-      const row = document.createElement("div");
-      row.className = "admin-row";
-      row.innerHTML = `
-        <div class="admin-private-detail">
-          <strong>${escapeHtml(item.title)}</strong>
-          <p>${escapeHtml(item.body)}</p>
-          <small>
-            ${escapeHtml(item.display_name || "")}
-            ${item.tester_google_id ? ` · ${escapeHtml(item.tester_google_id)}` : ""}
-            ${item.device ? ` · ${escapeHtml(item.device)}` : ""}
-            ${item.rating ? ` · ${escapeHtml(String(item.rating))}/5` : ""}
-          </small>
-        </div>
-        <select data-admin-status="${item.id}">
-          ${Object.entries(statusLabels)
-            .map(
-              ([value, label]) =>
-                `<option value="${value}" ${item.status === value ? "selected" : ""}>${label}</option>`
-            )
-            .join("")}
-        </select>
-        <input data-admin-reply="${item.id}" value="${escapeAttribute(
-          item.replies?.[0]?.body || item.admin_summary || ""
-        )}" placeholder="관리자 답변" />
-        <button class="secondary-button" type="button" data-admin-save="${item.id}">저장</button>
       `;
       return row;
     })
@@ -373,74 +329,9 @@ async function submitFeedback(event) {
   renderFeedback();
 }
 
-async function saveAdminUpdate(id, status, replyBody) {
-  const item = feedbackItems.find((entry) => entry.id === id);
-  if (!item) return;
-  item.status = status;
-  item.replies = replyBody
-    ? [
-        {
-          reply_name: "PawRelay Studio",
-          body: cleanText(replyBody, 800)
-        }
-      ]
-    : [];
-
-  if (supabaseClient && adminSession) {
-    const { error: updateError } = await supabaseClient
-      .from("feedback_posts")
-      .update({ status })
-      .eq("id", id);
-    if (updateError) {
-      alert(`상태 저장 실패: ${updateError.message}`);
-      return;
-    }
-    if (replyBody) {
-      const { error: replyError } = await supabaseClient.from("feedback_replies").insert({
-        post_id: id,
-        reply_name: "PawRelay Studio",
-        body: cleanText(replyBody, 800)
-      });
-      if (replyError) {
-        alert(`답변 저장 실패: ${replyError.message}`);
-        return;
-      }
-    }
-    await loadFeedback();
-  } else {
-    saveLocalUserItems();
-  }
-  renderFeedback();
-}
-
-async function adminLogin() {
-  if (!supabaseClient) {
-    els.adminState.textContent = "Supabase 미연결: 로컬 미리보기 관리자 모드";
-    return;
-  }
-  await supabaseClient.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: window.location.href.split("#")[0]
-    }
-  });
-}
-
-async function adminLogout() {
-  if (supabaseClient) {
-    await supabaseClient.auth.signOut();
-  }
-  adminSession = null;
-  els.adminState.textContent = "로그아웃됨";
-}
-
 function exportMarkdown() {
-  if (supabaseClient && !adminSession) {
-    alert("비공개 본문이 포함된 리포트는 관리자 Google 로그인 후 저장할 수 있습니다.");
-    return;
-  }
   const lines = [
-    "# PawRelay Closed Test Feedback Report",
+    "# PawRelay Closed Test Public Feedback Summary",
     "",
     `Generated: ${new Date().toISOString()}`,
     "",
@@ -463,12 +354,7 @@ function exportMarkdown() {
     lines.push(`- Category: ${item.category || "Other"}`);
     lines.push(`- Status: ${statusLabels[item.status] || item.status}`);
     lines.push(`- Created: ${formatDate(item.created_at)}`);
-    lines.push("");
-    lines.push(item.body);
-    if (item.replies?.length) {
-      lines.push("");
-      lines.push(`Reply: ${item.replies[0].body}`);
-    }
+    lines.push(`- Reply: ${item.has_reply ? "Registered" : "None"}`);
     lines.push("");
   });
 
@@ -481,26 +367,19 @@ function exportMarkdown() {
     lines.push("");
   });
 
-  downloadFile("pawrelay-closed-test-feedback-report.md", lines.join("\n"), "text/markdown");
+  downloadFile("pawrelay-closed-test-public-feedback-summary.md", lines.join("\n"), "text/markdown");
 }
 
 function exportCsv() {
-  if (supabaseClient && !adminSession) {
-    alert("Excel용 전체 리포트는 관리자 Google 로그인 후 저장할 수 있습니다.");
-    return;
-  }
   const header = [
     "created_at",
     "source_type",
     "display_name",
     "app_version",
     "category",
-    "device",
-    "rating",
     "status",
     "title",
-    "body",
-    "reply"
+    "has_reply"
   ];
   const rows = feedbackItems.map((item) =>
     [
@@ -509,16 +388,13 @@ function exportCsv() {
       item.display_name,
       item.app_version,
       item.category,
-      item.device,
-      item.rating,
       item.status,
       item.title,
-      item.body,
-      item.replies?.[0]?.body || item.admin_summary || ""
+      item.has_reply ? "yes" : "no"
     ].map(csvCell)
   );
   downloadFile(
-    "pawrelay-closed-test-feedback.csv",
+    "pawrelay-closed-test-public-feedback-summary.csv",
     [header.map(csvCell), ...rows].map((row) => row.join(",")).join("\n"),
     "text/csv"
   );
@@ -599,23 +475,6 @@ function bindEvents() {
   els.statusFilter.addEventListener("change", renderFeedback);
   els.exportMarkdown.addEventListener("click", exportMarkdown);
   els.exportCsv.addEventListener("click", exportCsv);
-  els.adminToggle.addEventListener("click", () => {
-    els.adminPanel.hidden = !els.adminPanel.hidden;
-    renderAdminEditor();
-    if (!els.adminPanel.hidden) {
-      els.adminPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  });
-  els.adminLogin.addEventListener("click", adminLogin);
-  els.adminLogout.addEventListener("click", adminLogout);
-  els.adminEditor.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-admin-save]");
-    if (!button) return;
-    const id = button.getAttribute("data-admin-save");
-    const status = els.adminEditor.querySelector(`[data-admin-status="${id}"]`)?.value || "received";
-    const reply = els.adminEditor.querySelector(`[data-admin-reply="${id}"]`)?.value || "";
-    saveAdminUpdate(id, status, reply);
-  });
   document.addEventListener("pointerdown", addTouchPaw, { passive: true });
 }
 
@@ -623,11 +482,6 @@ async function boot() {
   supabaseClient = initSupabase();
   if (supabaseClient) {
     els.submitNote.textContent = "Supabase 공개 보드에 저장됩니다. Google ID는 공개 목록에 표시하지 않습니다.";
-    const { data } = await supabaseClient.auth.getSession();
-    adminSession = data.session;
-    els.adminState.textContent = adminSession
-      ? `관리자 로그인됨: ${adminSession.user.email}`
-      : "관리자 로그인 필요";
   }
   bindEvents();
   renderTimeline();
