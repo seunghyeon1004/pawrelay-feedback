@@ -21,11 +21,11 @@ python3 -m http.server 8091
 ## Supabase 연결
 
 1. Supabase SQL Editor에서 `supabase-feedback-board.sql`을 실행합니다.
-2. `config.example.js`를 `config.js`로 복사합니다.
-3. `config.js`에 Supabase URL과 public anon key를 입력합니다.
+2. `config.public.js`에 Supabase URL과 public anon key를 입력합니다.
 4. Supabase Auth Google provider에 관리자 계정 `hyunever100@gmail.com` 로그인이 가능하도록 설정합니다.
 
-`config.js`는 `.gitignore`에 들어 있으므로 공개 저장소에 올라가지 않습니다.
+Supabase anon key는 클라이언트 공개 키입니다. 보안은 `supabase-feedback-board.sql`의 RLS와
+관리자 이메일 제한으로 처리합니다. service role key는 절대 이 사이트에 넣지 마세요.
 
 ## 제출 자료 운영 흐름
 
@@ -34,4 +34,3 @@ python3 -m http.server 8091
 3. 관리자가 Google 로그인 후 상태와 답변을 남깁니다.
 4. `Excel CSV 저장` 또는 `Markdown 저장`으로 전체 테스트 기록을 내보냅니다.
 5. 내보낸 파일을 Google Drive에 업로드하고 공유 URL을 Play Console 제출 자료에 첨부합니다.
-
